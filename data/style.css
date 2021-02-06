@@ -1,0 +1,26 @@
+html {
+   font-family: Helvetica;
+   display: inline-block;
+   margin: 0px auto;
+   text-align: left;}
+h1 {color: #0f2776; padding: 1vh;}
+p {font-size: 1rem;}
+input{ font-size: 1.1rem;}
+.button {
+  display: inline-block;
+  background-color: #008CBA;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  padding: 16px 40px;
+  text-decoration: none;
+  font-size: 30px;
+  margin: 2px;
+  cursor: pointer;
+  }
+.button2 {background-color: #f7574b;}
+.table {border: 1px solid #eee; table-layout:fixed; margin-bottom:20px; border-collapse:collapse; border-spacing:0px;}
+.table th {font-weight: bold; padding: 5px; background: #efefef; border: 1px solid #dddddd;}
+.table td {padding: 5px 10px; border: 1px solid #eee; text-align: left;}
+.table tbody tr:nth-child(odd) {background: #fff;}
+.table tbody tr:nth-child(even) {background: #F7F7F7;}

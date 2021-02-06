@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>%DEVICE%</title>
+  <meta name="viewport" content="width=device-width, initialscale=1">
+  <!-- <meta http-equiv='refresh' content='15'> -->
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+  <h1>%DEVICE%</h1>
+  <p>platform: &nbsp; %PLATFORM%</p>
+  <p>firmware: &nbsp; %FIRMWARE%</p>
+  <h2>States</h2>
+  <table class="table" id="states">
+    <thead><tr><th>Name<th>State<th>Actions</thead>
+    <tbody>
+      <tr><td>esp32dk1_3_uptime_s</td><td></td><td></td>
+      <tr><td>esp32dk1_3_wifi_signal</td><td></td><td></td>
+      <tr><td>esp32dk1_3_temperature</td><td></td><td></td>
+      <tr class="tr"><td>esp32dk1_3_LED_Blue</td><td></td><td><button>Toggle</button></td>
+      <tr class="rt"><td>esp32dk1_3_firmware_version</td><td></td><td></td>
+      <tr class="rt"><td>esp32dk1_3_uptime</td><td></td><td></td>
+    </tbody>
+  </table>
+  <p>GPIO state: <strong> %STATE%</strong></p>
+  <p><a href="/on"><button class="button">ON</button></a> 
+     <a href="/off"><button class="button button2">OFF</button></a></p>
+  <h2>OTA Update</h2>
+  <form method='POST' action='/doUpdate' enctype='multipart/form-data'>
+    <p><input type='file' name='update'>
+       <input type='submit' value='Update'></p>
+  </form>
+  <h2>Debug Log</h2>
+  %BUFLOG%
+</body>
+</html>
