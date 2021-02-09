@@ -12,13 +12,12 @@ input{ font-size: 1.1rem;}
   border: none;
   border-radius: 4px;
   color: white;
-  padding: 16px 40px;
+  padding: 2px 4px;
   text-decoration: none;
-  font-size: 30px;
+  font-size: 13px;
   margin: 2px;
   cursor: pointer;
   }
-.button2 {background-color: #f7574b;}
 .table {border: 1px solid #eee; table-layout:fixed; margin-bottom:20px; border-collapse:collapse; border-spacing:0px;}
 .table th {font-weight: bold; padding: 5px; background: #efefef; border: 1px solid #dddddd;}
 .table td {padding: 5px 10px; border: 1px solid #eee; text-align: left;}

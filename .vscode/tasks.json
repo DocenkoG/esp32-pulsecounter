@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "PlatformIO",
+			"task": "Build Filesystem Image (esp32doit-devkit-v1)",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build",
+			"label": "PlatformIO: Build Filesystem Image (esp32doit-devkit-v1)"
+		}
+	]
+}
