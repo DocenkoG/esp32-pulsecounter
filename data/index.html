@@ -16,7 +16,7 @@
     <thead><tr><th>Name<th>State<th>Actions</thead>
     <tbody>
       <tr><td>pcntr01_uptime_s</td><td></td><td></td>
-      <tr><td>pcntr01_wifi_signal</td><td></td><td></td>
+      <tr><td>pcntr01_wifi_signal</td><td>%RSSI%</td><td></td>
       <tr><td>pcntr01_temperature</td><td>%INTERNAL_TEMPERATURE%</td><td></td>
       <tr><td>pcntr01_LED_Blue</td><td>%STATE%</td><td><a href="/toggle"><button class="button">Toggle</button></a></td>
       <tr><td>pcntr01_firmware_version</td><td></td><td></td>
@@ -30,9 +30,18 @@
   </form>
   <h2>WIFI Setting</h2>
   <form method='POST' action='/setwifi' enctype='multipart/form-data'>
-    <p><input type="text" name='SSID'>
+    <p><input type="text" name='SSID' value=%WIFI_SSID%>
        <input type="password" name='Password'>
        <input type='submit' value='Update'></p>
+  </form>
+  <h2>MQTT Setting</h2>
+  <form method='POST' action='/setmqtt' enctype='multipart/form-data'>
+    <p>Host, &nbsp; Topic,<br>Login, Password</p>
+    <p><input type="text" name='host' value=%MQTT_HOST%>
+       <input type="text" name='topic' value=%MQTT_TOPIC%><br>
+       <input type="text" name='login' value=%MQTT_LOGIN% title="title">
+       <input type="password" name='Pass' value=%MQTT_PASS%>
+       <input type='submit' value='Submit'></p>
   </form>
   <h2>Debug Log</h2>
   %BUFLOG%
