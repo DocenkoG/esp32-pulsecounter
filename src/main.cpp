@@ -22,11 +22,13 @@ const char shortboardname[] = "esp32";    // краткое наименован
 const char ver[] = "v0.2";                // Номер версии прошивки (как в git)
 char hostname[16];
 char buildversion[45];             // Переменная для полной версии в формате: hostname, ver, date and time compilation 
-String buflog;                     // текстовый буфер для отладочного вывода в web
-#define MAX_BUFLOG_SIZE 4000       // ограничение размера этого буфера.
+String buflog = String('\n');             // текстовый буфер для отладочного вывода в web
+#define MAX_BUFLOG_SIZE 4000              // ограничение размера этого буфера.
 unsigned long time_to_meashure = 0;       // (2^32 - 1) = 4,294,967,295
 unsigned long time_to_reboot = 0;
 unsigned long time_to_blink = 0;
+int period_blink = 5;              // Период в секундах мигания при нормальной работе 
+int period_meashure = 60;           // Периодичность проведения измерений в секундах 
 size_t content_len;
 const char platform[] = ARDUINO_BOARD;
 const char device[] = "Pulse Counter 01";
@@ -53,13 +55,12 @@ void multiBlinc(int qty) {
 
 void log(const char *sss) {
    char tbuf[14];
-   sprintf(tbuf, "%010lu ", millis());
+   sprintf(tbuf, "%010lu  ", millis());
    Serial.print(tbuf);
-   Serial.print("  ");
    Serial.println(sss);
    buflog += tbuf + String(sss) + "<br>";
    if (buflog.length() > MAX_BUFLOG_SIZE) {
-      buflog = buildversion +  String("\n") + buflog.substring(buflog.indexOf("\n", 40));
+      buflog = buflog.substring(buflog.indexOf("\n", 100));
    }
 }
 
@@ -83,6 +84,18 @@ String processor(const String& var){
     return(buflog);
   } else if (var == "INTERNAL_TEMPERATURE") {
     return(String(internal_temperature));
+  } else if (var == "RSSI") {
+    return(String(WiFi.RSSI()));
+  } else if (var == "WIFI_SSID") {
+    return(String(setting.wifi_ssid));
+  } else if (var == "MQTT_HOST") {
+    return(String(setting.mqtt_host));
+  } else if (var == "MQTT_TOPIC") {
+    return(String(setting.mqtt_topic));
+  } else if (var == "MQTT_LOGIN") {
+    return(String(setting.mqtt_login));
+  } else if (var == "MQTT_PASS") {
+    return(String(setting.mqtt_pass));
   }
   return(String());
 }
@@ -139,25 +152,47 @@ void handleWifiUpdate(AsyncWebServerRequest *request) {
     log(setting.is_defined);
     log(setting.wifi_ssid);
     log(setting.wifi_pass);
-    log(setting.mqtt_host);
-    log(setting.mqtt_login);
-    log(setting.mqtt_pass);
-    log(setting.mqtt_topic);
     ESP.restart();
   }
 }
 
 
+void handleMqttUpdate(AsyncWebServerRequest *request) {
+  char newVal[32];
+  snprintf(newVal,15,"%s",request->getParam(0)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_host, 15,"%s",newVal);
+  }
+  snprintf(newVal,15,"%s",request->getParam(1)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_topic, 15,"%s",newVal);
+  }
+  snprintf(newVal,15,"%s",request->getParam(2)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_login, 15,"%s",newVal);
+  }
+  snprintf(newVal,15,"%s",request->getParam(3)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_pass, 15,"%s",newVal);
+  }
+  EEPROM.put(EEPROM_OFFSET, setting);
+  EEPROM.commit();
+  log(setting.mqtt_host);
+  log(setting.mqtt_topic);
+  log(setting.mqtt_login);
+  log(setting.mqtt_pass);
+  ESP.restart();
+}
+
+
 void webserver_start() {
+  char buf[60];
   /*use mdns for host name resolution*/
-  if (!MDNS.begin(hostname)) {                         // http://chipname.local
+  if (!MDNS.begin(hostname)) {                        
     Serial.println("Error setting up MDNS responder!");
     while (1) {
       delay(500);
       multiBlinc(2);
     }
   }
-  log("mDNS responder started");
+  snprintf(buf,sizeof(buf),"mDNS responder started. Use http://%s.local",hostname);
+  log(buf);
   webserver.on("/",          HTTP_GET, [](AsyncWebServerRequest *request){request->send(SPIFFS, "/index.html", String(), false, processor);});
   webserver.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){request->send(SPIFFS, "/style.css", "text/css");});
   webserver.on("/toggle",    HTTP_GET, [](AsyncWebServerRequest *request){
@@ -174,9 +209,14 @@ void webserver_start() {
     handleDoUpdate(request, filename, index, data, len, final);
     });
   webserver.on("/setwifi",  HTTP_POST, [](AsyncWebServerRequest *request){
-    handleWifiUpdate(request);
     request->redirect("/"); 
     request->send(SPIFFS, "/index.html", String(), false, processor); 
+    handleWifiUpdate(request);
+    });
+  webserver.on("/setmqtt",  HTTP_POST, [](AsyncWebServerRequest *request){
+    request->redirect("/"); 
+    request->send(SPIFFS, "/index.html", String(), false, processor); 
+    handleMqttUpdate(request);
     });
   webserver.onNotFound([](AsyncWebServerRequest *request){request->send(404);});
   webserver.begin();
@@ -200,19 +240,17 @@ void getNewSSID() {
 
 void connect_wifi() {
   EEPROM.get(EEPROM_OFFSET, setting);
-  log(setting.wifi_ssid);
-  log(setting.wifi_pass);
   if (setting.is_defined[0] != 'Y') {
     getNewSSID();
   }
   WiFi.persistent(false);
   delay(10);
   log("Connecting to ");
-  log(setting.wifi_ssid); log(setting.wifi_pass);
+  log(setting.wifi_ssid);
   WiFi.begin(setting.wifi_ssid, setting.wifi_pass);
-  for (int k = 0; k < 10; ++k) {
+  for (int k = 0; k < 12; ++k) {
     if (WiFi.status() == WL_CONNECTED) {
-      log(WiFi.localIP());
+      log(WiFi.localIP().toString().c_str());
       return;
     } else {
       log(".");
@@ -233,14 +271,12 @@ void setup(void) {
   Serial.begin(115200);
   //Serial.setDebugOutput(true);
   Serial.println("");
+  log("begin");
   uint64_t chipid = ESP.getEfuseMac();             // The chip ID is essentially its MAC address(length: 6 bytes).
   uint16_t chip = (uint16_t)(chipid >> 32);
   snprintf(chipstr, sizeof(chipstr), "%04X", chip);
   snprintf(hostname, sizeof(hostname), "%s-pc-01", shortboardname);
   snprintf(buildversion, sizeof(buildversion), "%s, %s, %s %s", hostname, ver, __DATE__, __TIME__);
-  log(buildversion);
-  buflog = buildversion + String("\n");
-  log("begin");
   if(!SPIFFS.begin(true)){
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
@@ -252,13 +288,10 @@ void setup(void) {
   connect_wifi();
   WiFi.enableSTA(true);
   // TODO Hostname setting does not work. Always shows up as "espressif"
-  if(WiFi.setHostname(hostname)) {
-    Serial.printf("\nHostname set!\n");
-  } else {
-    Serial.printf("\nHostname NOT set!\n");
-  }
+  WiFi.setHostname(hostname);
   multiBlinc(2);
   webserver_start();
+  time_to_blink = millis() + 1000UL * period_blink;
   dallassensor.begin();
 }
 
@@ -266,11 +299,11 @@ void setup(void) {
 void loop(void) {
   char str[32];
   if (millis() > time_to_blink) {
-    time_to_blink = millis() + 1000UL * 5;
+    time_to_blink = millis() + 1000UL * period_blink;
     multiBlinc(1);
   }
   if (millis() > time_to_meashure) {
-    time_to_meashure = millis() + 1000UL * 60;
+    time_to_meashure = millis() + 1000UL * period_meashure;
     dallassensor.requestTemperatures(); // Send the command to get temperatures
     snprintf(internal_temperature, sizeof(internal_temperature), "%.2f", dallassensor.getTempCByIndex(0));
     snprintf(str,sizeof(str),"Internal_temperature = %s;", internal_temperature);
