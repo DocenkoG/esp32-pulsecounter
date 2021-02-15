@@ -33,6 +33,7 @@ size_t content_len;
 const char platform[] = ARDUINO_BOARD;
 const char device[] = "Pulse Counter 01";
 char internal_temperature[7];
+char external_temperature[7];
 struct config{
   char is_defined[2];
   char wifi_ssid[16];
@@ -82,8 +83,10 @@ String processor(const String& var){
     return(String(device));
   } else if (var == "BUFLOG") {
     return(buflog);
-  } else if (var == "INTERNAL_TEMPERATURE") {
+  } else if (var == "INTERNAL_T") {
     return(String(internal_temperature));
+  } else if (var == "EXTERNAL_T") {
+    return(String(external_temperature));
   } else if (var == "RSSI") {
     return(String(WiFi.RSSI()));
   } else if (var == "WIFI_SSID") {
@@ -305,8 +308,11 @@ void loop(void) {
   if (millis() > time_to_meashure) {
     time_to_meashure = millis() + 1000UL * period_meashure;
     dallassensor.requestTemperatures(); // Send the command to get temperatures
-    snprintf(internal_temperature, sizeof(internal_temperature), "%.2f", dallassensor.getTempCByIndex(0));
+    snprintf(internal_temperature, sizeof(internal_temperature), "%.2f", dallassensor.getTempCByIndex(1));
     snprintf(str,sizeof(str),"Internal_temperature = %s;", internal_temperature);
+    log(str);
+    snprintf(external_temperature, sizeof(external_temperature), "%.2f", dallassensor.getTempCByIndex(0));
+    snprintf(str,sizeof(str),"External_temperature = %s;", external_temperature);
     log(str);
   }
   delay(1);
