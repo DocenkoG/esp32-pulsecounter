@@ -13,38 +13,45 @@ AsyncWebServer webserver(80);
 #define ONEWIRE_PIN  19                   // pin for OneWire DS18S20, DS18B20, DS1822
 OneWire oneWire(ONEWIRE_PIN);             // объект для работы с библиотекой OneWire
 DallasTemperature dallassensor(&oneWire); // объект для работы с библиотекой DallasTemperature
+// ----------------------------------- MQTT ------------------------------------------
+#include <AsyncMqttClient.h>
+AsyncMqttClient mqttClient;
 // -----------------------------------------------------------------------------------
 #include <EEPROM.h>
 #define EEPROM_OFFSET   1
 #include "SPIFFS.h"
+#define MQTT_HOST IPAddress(192, 168, 22, 78)
+#define MQTT_PORT 1883
 
-const char shortboardname[] = "esp32";    // краткое наименование девайса
-const char ver[] = "v0.2";                // Номер версии прошивки (как в git)
+const char device[] = "Pulse Counter 01";
+const char shortboardname[] = "esp32";  // краткое наименование девайса
+const char ver[] = "v0.3";              // Номер версии прошивки (как в git)
+TimerHandle_t mqttReconnectTimer;
+TimerHandle_t wifiReconnectTimer;
 char hostname[16];
-char buildversion[45];             // Переменная для полной версии в формате: hostname, ver, date and time compilation 
-String buflog = String('\n');             // текстовый буфер для отладочного вывода в web
-#define MAX_BUFLOG_SIZE 4000              // ограничение размера этого буфера.
-unsigned long time_to_meashure = 0;       // (2^32 - 1) = 4,294,967,295
+char buildversion[45];                  // Переменная для полной версии в формате: hostname, ver, date and time compilation 
+String buflog = String('\n');           // текстовый буфер для отладочного вывода в web
+#define MAX_BUFLOG_SIZE 4000            // ограничение размера этого буфера.
+unsigned long time_to_meashure = 0;     // (2^32 - 1) = 4,294,967,295
 unsigned long time_to_reboot = 0;
 unsigned long time_to_blink = 0;
-int period_blink = 5;              // Период в секундах мигания при нормальной работе 
-int period_meashure = 60;           // Периодичность проведения измерений в секундах 
+int period_blink = 5;                   // Период в секундах мигания при нормальной работе 
+int period_meashure = 60;               // Периодичность проведения измерений в секундах 
 size_t content_len;
 const char platform[] = ARDUINO_BOARD;
-const char device[] = "Pulse Counter 01";
 char internal_temperature[7];
 char external_temperature[7];
 struct config{
   char is_defined[2];
   char wifi_ssid[16];
   char wifi_pass[32];
-  char mqtt_host[16];
+  char mqtt_host[32];
   char mqtt_login[16];
   char mqtt_pass[16];
   char mqtt_topic[16]; 
 };
 config setting;
-
+int qty_wifi_attempt = 0;
 
 void multiBlinc(int qty) {
    for (int i = 0; i < qty + qty; i++) {
@@ -52,7 +59,6 @@ void multiBlinc(int qty) {
       delay(150);
    }
 }
-
 
 void log(const char *sss) {
    char tbuf[14];
@@ -64,7 +70,6 @@ void log(const char *sss) {
       buflog = buflog.substring(buflog.indexOf("\n", 100));
    }
 }
-
 
 String processor(const String& var){
   if(var == "STATE"){
@@ -103,7 +108,6 @@ String processor(const String& var){
   return(String());
 }
 
-
 void handleDoUpdate(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
   if (!index){
     Serial.println("Update");
@@ -134,7 +138,6 @@ void handleDoUpdate(AsyncWebServerRequest *request, const String& filename, size
   }
 }
 
-
 void handleWifiUpdate(AsyncWebServerRequest *request) {
   char newSsid[16];
   char newPass[32];
@@ -159,20 +162,19 @@ void handleWifiUpdate(AsyncWebServerRequest *request) {
   }
 }
 
-
 void handleMqttUpdate(AsyncWebServerRequest *request) {
   char newVal[32];
-  snprintf(newVal,15,"%s",request->getParam(0)->value().c_str());
-  if (newVal[0] != '\0') {snprintf(setting.mqtt_host, 15,"%s",newVal);
+  snprintf(newVal,32,"%s",request->getParam(0)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_host, sizeof(setting.mqtt_host),"%s",newVal);
   }
-  snprintf(newVal,15,"%s",request->getParam(1)->value().c_str());
-  if (newVal[0] != '\0') {snprintf(setting.mqtt_topic, 15,"%s",newVal);
+  snprintf(newVal,32,"%s",request->getParam(1)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_topic, sizeof(setting.mqtt_topic),"%s",newVal);
   }
-  snprintf(newVal,15,"%s",request->getParam(2)->value().c_str());
-  if (newVal[0] != '\0') {snprintf(setting.mqtt_login, 15,"%s",newVal);
+  snprintf(newVal,32,"%s",request->getParam(2)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_login, sizeof(setting.mqtt_login),"%s",newVal);
   }
-  snprintf(newVal,15,"%s",request->getParam(3)->value().c_str());
-  if (newVal[0] != '\0') {snprintf(setting.mqtt_pass, 15,"%s",newVal);
+  snprintf(newVal,32,"%s",request->getParam(3)->value().c_str());
+  if (newVal[0] != '\0') {snprintf(setting.mqtt_pass, sizeof(setting.mqtt_pass),"%s",newVal);
   }
   EEPROM.put(EEPROM_OFFSET, setting);
   EEPROM.commit();
@@ -183,16 +185,11 @@ void handleMqttUpdate(AsyncWebServerRequest *request) {
   ESP.restart();
 }
 
-
 void webserver_start() {
   char buf[60];
   /*use mdns for host name resolution*/
   if (!MDNS.begin(hostname)) {                        
-    Serial.println("Error setting up MDNS responder!");
-    while (1) {
-      delay(500);
-      multiBlinc(2);
-    }
+    log("Error setting up MDNS responder!");
   }
   snprintf(buf,sizeof(buf),"mDNS responder started. Use http://%s.local",hostname);
   log(buf);
@@ -225,7 +222,6 @@ void webserver_start() {
   webserver.begin();
 }
 
-
 void getNewSSID() {
   WiFi.mode(WIFI_AP);
   WiFiServer asServer(80);
@@ -234,47 +230,124 @@ void getNewSSID() {
   log(WiFi.macAddress().c_str());
   log(WiFi.softAPIP().toString().c_str());
   webserver_start();
-  unsigned long t2 = millis() + 1000 * 60 * 15;
+  unsigned long t2 = millis() + 1000 * 60 * 3;
   while (t2 > millis()) {
   } 
   ESP.restart();
 }
 
-
-void connect_wifi() {
-  EEPROM.get(EEPROM_OFFSET, setting);
-  if (setting.is_defined[0] != 'Y') {
+void connectToWifi() {
+  log("[connetToWifi()]");
+  if ((setting.is_defined[0] != 'Y') || (setting.wifi_ssid[0] == '\0')) {
     getNewSSID();
   }
-  WiFi.persistent(false);
-  delay(10);
-  log("Connecting to ");
-  log(setting.wifi_ssid);
+  Serial.printf("Connecting to Wi-Fi, to %s ...\n",setting.wifi_ssid);
   WiFi.begin(setting.wifi_ssid, setting.wifi_pass);
-  for (int k = 0; k < 12; ++k) {
-    if (WiFi.status() == WL_CONNECTED) {
-      log(WiFi.localIP().toString().c_str());
-      return;
-    } else {
-      log(".");
-      if (WiFi.status() == WL_CONNECT_FAILED) {
-        break;
-      }
-      delay(1000);
-    }
-  }
-  log(">>>  Timeout !");
-  getNewSSID();
 }
 
+void connectToMqtt() {
+  log("Connecting to MQTT...");
+  log(setting.mqtt_host);
+  log(setting.mqtt_login);
+  log(setting.mqtt_pass);
+  mqttClient.connect();
+}
+
+void WiFiEvent(WiFiEvent_t event) {
+    Serial.printf("[WiFi-event] event: %d\n", event);
+    switch(event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.println("WiFi connected. IP address: ");
+        Serial.println(WiFi.localIP());
+        qty_wifi_attempt = 0;
+        connectToMqtt();
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.printf("WiFi lost connection %d\n", ++qty_wifi_attempt);
+        xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+        if (qty_wifi_attempt >= 4) {
+          qty_wifi_attempt = 0;
+          getNewSSID();
+        }
+        
+		xTimerStart(wifiReconnectTimer, 0);
+        break;
+    }
+}
+
+void onMqttConnect(bool sessionPresent) {
+  Serial.println("Connected to MQTT.");
+  Serial.print("Session present: ");
+  Serial.println(sessionPresent);
+  uint16_t packetIdSub = mqttClient.subscribe("test/lol", 2);
+  Serial.print("Subscribing at QoS 2, packetId: ");
+  Serial.println(packetIdSub);
+  mqttClient.publish("test/lol", 0, true, "test 1");
+  Serial.println("Publishing at QoS 0");
+  uint16_t packetIdPub1 = mqttClient.publish("test/lol", 1, true, "test 2");
+  Serial.print("Publishing at QoS 1, packetId: ");
+  Serial.println(packetIdPub1);
+  uint16_t packetIdPub2 = mqttClient.publish("test/lol", 2, true, "test 3");
+  Serial.print("Publishing at QoS 2, packetId: ");
+  Serial.println(packetIdPub2);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  Serial.println("Disconnected from MQTT.");
+
+  if (WiFi.isConnected()) {
+    xTimerStart(mqttReconnectTimer, 0);
+  }
+}
+
+void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
+  Serial.println("Subscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+  Serial.print("  qos: ");
+  Serial.println(qos);
+}
+
+void onMqttUnsubscribe(uint16_t packetId) {
+  Serial.println("Unsubscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+}
+
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+  Serial.println("Publish received.");
+  Serial.print("  topic: ");
+  Serial.println(topic);
+  Serial.print("  qos: ");
+  Serial.println(properties.qos);
+  Serial.print("  dup: ");
+  Serial.println(properties.dup);
+  Serial.print("  retain: ");
+  Serial.println(properties.retain);
+  Serial.print("  len: ");
+  Serial.println(len);
+  Serial.print("  index: ");
+  Serial.println(index);
+  Serial.print("  total: ");
+  Serial.println(total);
+}
+
+void onMqttPublish(uint16_t packetId) {
+  Serial.println("Publish acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+}
 
 void setup(void) {
   char chipstr[5];                                // последние 4 байта мак-адреса чипа
+  IPAddress ipmqtt;
   pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(115200);
   //Serial.setDebugOutput(true);
   Serial.println("");
   log("begin");
+  mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
+  wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
   uint64_t chipid = ESP.getEfuseMac();             // The chip ID is essentially its MAC address(length: 6 bytes).
   uint16_t chip = (uint16_t)(chipid >> 32);
   snprintf(chipstr, sizeof(chipstr), "%04X", chip);
@@ -288,16 +361,23 @@ void setup(void) {
     Serial.println("failed to initialise EEPROM"); delay(1000 * 10);
   }
   multiBlinc(3);
-  connect_wifi();
-  WiFi.enableSTA(true);
-  // TODO Hostname setting does not work. Always shows up as "espressif"
-  WiFi.setHostname(hostname);
+  EEPROM.get(EEPROM_OFFSET, setting);
+  WiFi.onEvent(WiFiEvent);
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onSubscribe(onMqttSubscribe);
+  mqttClient.onUnsubscribe(onMqttUnsubscribe);
+  mqttClient.onMessage(onMqttMessage);
+  mqttClient.onPublish(onMqttPublish);
+  ipmqtt.fromString(String(setting.mqtt_host));
+  mqttClient.setServer(ipmqtt, MQTT_PORT);
+  mqttClient.setCredentials(setting.mqtt_login, setting.mqtt_pass);
+  connectToWifi();
   multiBlinc(2);
   webserver_start();
   time_to_blink = millis() + 1000UL * period_blink;
   dallassensor.begin();
 }
-
 
 void loop(void) {
   char str[32];
@@ -311,6 +391,7 @@ void loop(void) {
     snprintf(internal_temperature, sizeof(internal_temperature), "%.2f", dallassensor.getTempCByIndex(1));
     snprintf(str,sizeof(str),"Internal_temperature = %s;", internal_temperature);
     log(str);
+    uint16_t packetIdPub2 = mqttClient.publish("internal_temperature", 2, true, internal_temperature);
     snprintf(external_temperature, sizeof(external_temperature), "%.2f", dallassensor.getTempCByIndex(0));
     snprintf(str,sizeof(str),"External_temperature = %s;", external_temperature);
     log(str);
