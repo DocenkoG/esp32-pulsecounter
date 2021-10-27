@@ -16,27 +16,27 @@ DallasTemperature dallassensor(&oneWire); // объект для работы с
 // ----------------------------------- MQTT ------------------------------------------
 #include <AsyncMqttClient.h>
 AsyncMqttClient mqttClient;
+#define MQTT_PORT 1883
 // -----------------------------------------------------------------------------------
 #include <EEPROM.h>
 #define EEPROM_OFFSET   1
 #include "SPIFFS.h"
-#define MQTT_HOST IPAddress(192, 168, 22, 78)
-#define MQTT_PORT 1883
+#include <ArduinoJson.h>
 
 const char device[] = "Pulse Counter 01";
-const char shortboardname[] = "esp32";  // краткое наименование девайса
-const char ver[] = "v0.3";              // Номер версии прошивки (как в git)
+const char shorthostname[] = "esp32pc01"; // краткое наименование девайса
+const char ver[] = "v0.3";                // Номер версии прошивки (как в git)
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
-char hostname[16];
-char buildversion[45];                  // Переменная для полной версии в формате: hostname, ver, date and time compilation 
-String buflog = String('\n');           // текстовый буфер для отладочного вывода в web
-#define MAX_BUFLOG_SIZE 4000            // ограничение размера этого буфера.
-unsigned long time_to_meashure = 0;     // (2^32 - 1) = 4,294,967,295
+char hostname[18];
+char buildversion[45];                    // Переменная для полной версии в формате: hostname, ver, date and time compilation 
+String buflog = String('\n');             // текстовый буфер для отладочного вывода в web
+#define MAX_BUFLOG_SIZE 4000              // ограничение размера этого буфера.
+unsigned long time_to_meashure = 0;       // (2^32 - 1) = 4,294,967,295
 unsigned long time_to_reboot = 0;
 unsigned long time_to_blink = 0;
-int period_blink = 5;                   // Период в секундах мигания при нормальной работе 
-int period_meashure = 60;               // Периодичность проведения измерений в секундах 
+int period_blink = 5;                     // Период в секундах мигания при нормальной работе 
+int period_meashure = 20;                 // Периодичность проведения измерений в секундах 
 size_t content_len;
 const char platform[] = ARDUINO_BOARD;
 char internal_temperature[7];
@@ -351,8 +351,9 @@ void setup(void) {
   uint64_t chipid = ESP.getEfuseMac();             // The chip ID is essentially its MAC address(length: 6 bytes).
   uint16_t chip = (uint16_t)(chipid >> 32);
   snprintf(chipstr, sizeof(chipstr), "%04X", chip);
-  snprintf(hostname, sizeof(hostname), "%s-pc-01", shortboardname);
+  snprintf(hostname, sizeof(hostname), "%s-%s", shorthostname,chipstr);
   snprintf(buildversion, sizeof(buildversion), "%s, %s, %s %s", hostname, ver, __DATE__, __TIME__);
+  log(hostname);
   if(!SPIFFS.begin(true)){
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
@@ -380,21 +381,25 @@ void setup(void) {
 }
 
 void loop(void) {
-  char str[32];
+  StaticJsonDocument<200> jdoc;
+  char topic_char[32];
+  char buf_char[128];
   if (millis() > time_to_blink) {
     time_to_blink = millis() + 1000UL * period_blink;
     multiBlinc(1);
   }
   if (millis() > time_to_meashure) {
     time_to_meashure = millis() + 1000UL * period_meashure;
-    dallassensor.requestTemperatures(); // Send the command to get temperatures
+    dallassensor.requestTemperatures();                     // Send the command to get temperatures
     snprintf(internal_temperature, sizeof(internal_temperature), "%.2f", dallassensor.getTempCByIndex(1));
-    snprintf(str,sizeof(str),"Internal_temperature = %s;", internal_temperature);
-    log(str);
-    uint16_t packetIdPub2 = mqttClient.publish("internal_temperature", 2, true, internal_temperature);
+    jdoc["internal_temperature"] = internal_temperature;
     snprintf(external_temperature, sizeof(external_temperature), "%.2f", dallassensor.getTempCByIndex(0));
-    snprintf(str,sizeof(str),"External_temperature = %s;", external_temperature);
-    log(str);
+    jdoc["external_temperature"] = external_temperature;
+    serializeJson(jdoc, buf_char);
+    snprintf(topic_char, sizeof(topic_char), "%s/data", hostname);  
+    uint16_t packetIdPub2 = mqttClient.publish(topic_char, 2, true, buf_char);
+    log(topic_char);
+    log(buf_char);
   }
   delay(1);
 }
